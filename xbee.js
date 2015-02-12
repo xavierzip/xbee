@@ -24,7 +24,9 @@ var xbeeAPI = new xbee_api.XBeeAPI({
   raw_frames: false
 });
 
-var serialport = new SerialPort("/dev/ttyUSB0", {
+var COM_PORT = process.argv[2]
+
+var serialport = new SerialPort(COM_PORT, {
   baudrate: 9600,
   parser: xbeeAPI.rawParser()
 });
