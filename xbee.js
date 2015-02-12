@@ -1,8 +1,19 @@
 var util = require('util');
 var SerialPort = require('serialport').SerialPort;
 var xbee_api = require('xbee-api');
+var Client = require('node-rest-client').Client;
 
 var C = xbee_api.constants;
+var client = new Client();
+
+// registering remote methods 
+//client.registerMethod("postMethod", "http://192.168.7.2:3000/nodes", "POST");
+//client.methods.postMethod(args, function(data,response){
+//    // parsed response body as js object 
+//    console.log(data);
+//    // raw response 
+//    console.log(response);
+//});
 
 var g_COORDINATOR_ADDR16_LSB = 0x00;
 var g_COORDINATOR_ADDR16_MSB = 0x00;
@@ -13,10 +24,26 @@ var xbeeAPI = new xbee_api.XBeeAPI({
   raw_frames: false
 });
 
-var serialport = new SerialPort("COM9", {
+var serialport = new SerialPort("/dev/ttyUSB0", {
   baudrate: 9600,
   parser: xbeeAPI.rawParser()
 });
+
+// Create a variable store the list of nodes at server
+var nodes;
+
+var API_GET_NODES = function (){
+    client.get("http://127.0.0.1:3000/api/nodes", function(data,response) {
+        // parsed response body as js object 
+        nodes = JSON.parse(data)
+        console.log(nodes)
+        // raw response 
+        console.log(response.statusCode);
+    });
+}
+
+
+API_GET_NODES();
 
 serialport.on("open", function() {
 //  console.log("Serial port open... sending ATND");
@@ -51,6 +78,7 @@ var sendAPI = function(frame){
 
 // XBee Command set
 var AT_COMMAND_RESPONSE                 = 0x88
+var ZIGBEE_TRANSMIT_STATUS              = 0x8B
 var ZIGBEE_EXPLICIT_RX_INDICATOR        = 0x91
 var EXPLICIT_ZIGBEE_COMMAND_FRAME       = 0x11
 
@@ -58,6 +86,7 @@ var EXPLICIT_ZIGBEE_COMMAND_FRAME       = 0x11
 var ZB_MATCH_DESCRIPTOR_REQUEST         = 0x0006
 var ZB_MATCH_DESCRIPTOR_RESPONSE        = 0x8006
 var ZB_DEVICE_ANNOUNCE                  = 0x0013
+var ZB_MANAGEMENT_LEAVE_REQUEST         = 0x0034
 var ZB_IAS_ZONE                         = 0x0500
 
 // ZCL Profile ID
@@ -114,6 +143,10 @@ var handle_ZB_Explicit_Rx_Indicator = function (frame){
                 case ZB_DEVICE_ANNOUNCE:
                     console.log('=>Device Announce')
                     break;
+                case ZB_MANAGEMENT_LEAVE_REQUEST:
+                    console.log('=>Management Leave Request')
+                    
+                    break;
                 default:
                     break;
             }
@@ -124,6 +157,9 @@ var handle_ZB_Explicit_Rx_Indicator = function (frame){
             switch(cm_id){
                 case ZB_ZONE_ENROLL_REQUEST:
                     console.log('=>Zone Enroll Request')
+                    // New device enroll request
+                    // Add the device to the node list
+                    API_POST_NODE(frame.remote16, frame.remote64)
                     break;
                 case ZB_ZONE_STATUS_CHANGE_NOTIFICATION:
                     console.log('=>Zone Status Change')
@@ -163,6 +199,33 @@ var handle_ZB_Explicit_Rx_Indicator = function (frame){
     }
 }
 
+var API_POST_NODE = function (ADDR16, ADDR64){
+    var args = {
+        data: {
+          'ADDR16': ADDR16,
+          'MAC': ADDR64,
+          'ADDR64': ADDR64
+        },
+        headers:{"Content-Type": "application/json"} 
+    };
+    client.post("http://127.0.0.1:3000/api/nodes", args, function(data,response) {
+        // parsed response body as js object 
+        // console.log(data);
+        // raw response 
+        console.log(response.statusCode);
+    });
+}
+
+var API_DELETE_NODE = function (id){
+    client.delete("http://127.0.0.1:3000/api/nodes"+id.toString, function(data,response) {
+        // parsed response body as js object 
+        // console.log(data);
+        // raw response 
+        console.log(response.statusCode);
+    });
+}
+
+
 var handle_ZB_AT_Command_Response = function (frame){
     console.log('Command> '+frame.command)
     switch(frame.command){
@@ -181,7 +244,7 @@ var handle_ZB_AT_Command_Response = function (frame){
 }
 
 xbeeAPI.on("frame_object", function(frame) {
-//    console.log("OBJ> "+util.inspect(frame));
+    console.log("OBJ> "+(frame.type));
     switch (frame.type){
         case AT_COMMAND_RESPONSE:
             console.log('**AT Command Response**')
@@ -191,7 +254,11 @@ xbeeAPI.on("frame_object", function(frame) {
             console.log('**ZB Explicit Rx**')
             handle_ZB_Explicit_Rx_Indicator(frame);
             break;
+        case ZIGBEE_TRANSMIT_STATUS:
+            console.log('**ZB Transmit Successful')
+            break;
         default:
+            console.log('**ZB Message Rx**')
             break;
     }
 });
